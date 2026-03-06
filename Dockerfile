@@ -5,20 +5,18 @@ FROM node:20 AS node-builder
 
 WORKDIR /var/www
 
-# Install build tools for esbuild
+# Install build tools for esbuild (Python + build-essential)
 RUN apt-get update && apt-get install -y python3 build-essential libc6-dev
 
-# Copy package files
+# Copy only package files first for caching
 COPY package*.json ./
 COPY vite.config.js ./
 
-# Copy resources for build
+# Copy resources needed for build
 COPY resources ./resources
 
-# Install node dependencies
-RUN npm install
-
-# Build Vite assets
+# Install dependencies & build
+RUN npm install --legacy-peer-deps
 RUN npm run build
 
 # ============================
@@ -28,7 +26,7 @@ FROM php:8.2-fpm
 
 WORKDIR /var/www
 
-# Install PHP extensions for Laravel + PostgreSQL
+# Install system dependencies & PHP extensions
 RUN apt-get update && apt-get install -y \
   libpq-dev \
   unzip \
@@ -38,13 +36,13 @@ RUN apt-get update && apt-get install -y \
   zip \
   && docker-php-ext-install pdo pdo_pgsql zip
 
-# Copy Laravel files
+# Copy Laravel project files
 COPY . .
 
-# Copy built assets from node stage
+# Copy built Vite assets from Node stage
 COPY --from=node-builder /var/www/public/build ./public/build
 
-# Set permissions
+# Set permissions for storage & cache
 RUN chown -R www-data:www-data /var/www \
   && chmod -R 775 storage bootstrap/cache
 
@@ -54,9 +52,11 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-# Create empty SQLite (if needed)
+# Optional: Create SQLite file if your app uses it
 RUN touch database/database.sqlite
 
-# Expose port and start PHP-FPM
+# Expose PHP-FPM port
 EXPOSE 9000
+
+# Start PHP-FPM
 CMD ["php-fpm"]
