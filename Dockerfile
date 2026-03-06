@@ -47,3 +47,8 @@ CMD php artisan migrate --force && \
   php artisan config:cache && \
   php artisan route:cache && \
   php artisan serve --host=0.0.0.0 --port=10000
+
+
+# example
+RUN apt-get update && apt-get install -y libpq-dev \
+  && docker-php-ext-install pdo_pgsql
