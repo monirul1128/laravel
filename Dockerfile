@@ -1,62 +1,49 @@
-# =====================================================
-# Stage 1: Node Build (Light & Stable)
-# =====================================================
+# ============================
+# Stage 1 – Node Build (Vite)
+# ============================
 FROM node:20-alpine AS node-builder
 
 WORKDIR /app
 
 COPY package*.json ./
-
-# Install dependencies
-RUN npm install --legacy-peer-deps --ignore-scripts
+RUN npm install --legacy-peer-deps
 
 COPY . .
 
-# Build with memory safe mode
-ENV NODE_OPTIONS="--max-old-space-size=512"
-
-RUN npm run build || echo "Build warning ignored"
+# Vite build
+RUN npm run build
 
 
-# =====================================================
-# Stage 2: PHP Production
-# =====================================================
+# ============================
+# Stage 2 – PHP + Laravel
+# ============================
 FROM php:8.2-fpm-alpine
 
 WORKDIR /var/www
 
-# Install required extensions
+# Required packages
 RUN apk add --no-cache \
-  git \
-  curl \
-  libpq-dev \
-  zip \
-  unzip \
-  nodejs \
-  npm
+  git curl zip unzip nodejs npm libpng-dev libzip-dev
 
-RUN docker-php-ext-install pdo pdo_pgsql
+# PHP extensions
+RUN docker-php-ext-install pdo pdo_mysql zip
 
-# Install composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-
-# Copy Laravel app
+# Copy project
 COPY . .
 
-# Copy built assets
+# Copy Vite build from stage 1
 COPY --from=node-builder /app/public/build ./public/build
 
-# Install composer
+# Composer install
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 RUN composer install --no-dev --optimize-autoloader
 
-# Fix permissions
+# Permissions
 RUN chmod -R 775 storage bootstrap/cache
-
-# Cache optimize
-RUN php artisan config:cache \
-  && php artisan route:cache \
-  && php artisan view:cache
 
 EXPOSE 10000
 
-CMD php artisan serve --host=0.0.0.0 --port=10000
+CMD php artisan migrate --force && \
+  php artisan config:cache && \
+  php artisan route:cache && \
+  php artisan serve --host=0.0.0.0 --port=10000
