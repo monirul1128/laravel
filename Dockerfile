@@ -1,62 +1,66 @@
-# ============================
-# Stage 1: Node build (Vite assets)
-# ============================
-FROM node:20 AS node-builder
+# =====================================================
+# Stage 1: Node Build (Vite Assets)
+# =====================================================
+FROM node:20-bullseye AS node-builder
 
 WORKDIR /var/www
 
-# Install build tools for esbuild (Python + build-essential)
-RUN apt-get update && apt-get install -y python3 build-essential libc6-dev
+# Install system tools for node build
+RUN apt-get update && apt-get install -y python3 build-essential
 
-# Copy only package files first for caching
+# Copy package files
 COPY package*.json ./
 COPY vite.config.js ./
 
-# Copy resources needed for build
-COPY resources ./resources
-
-# Install dependencies & build
+# Install dependencies
 RUN npm install --legacy-peer-deps
+
+# Copy source code for build
+COPY resources ./resources
+COPY public ./public
+
+# Build assets
 RUN npm run build
 
-# ============================
-# Stage 2: PHP + Laravel
-# ============================
-FROM php:8.2-fpm
+
+# =====================================================
+# Stage 2: PHP + Laravel (Production)
+# =====================================================
+FROM php:8.2-fpm-bullseye
 
 WORKDIR /var/www
 
-# Install system dependencies & PHP extensions
+# Install required system packages
 RUN apt-get update && apt-get install -y \
-  libpq-dev \
-  unzip \
   git \
   curl \
+  unzip \
+  libpq-dev \
   libzip-dev \
   zip \
   && docker-php-ext-install pdo pdo_pgsql zip
 
-# Copy Laravel project files
-COPY . .
-
-# Copy built Vite assets from Node stage
-COPY --from=node-builder /var/www/public/build ./public/build
-
-# Set permissions for storage & cache
-RUN chown -R www-data:www-data /var/www \
-  && chmod -R 775 storage bootstrap/cache
-
-# Install composer
+# Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Install PHP dependencies
+# Copy application
+COPY . .
+
+# Copy built assets from node stage
+COPY --from=node-builder /var/www/public/build ./public/build
+
+# Install Laravel dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-# Optional: Create SQLite file if your app uses it
-RUN touch database/database.sqlite
+# Fix permissions
+RUN chmod -R 775 storage bootstrap/cache
 
-# Expose PHP-FPM port
-EXPOSE 9000
+# Generate optimized config
+RUN php artisan config:cache \
+  && php artisan route:cache \
+  && php artisan view:cache
 
-# Start PHP-FPM
-CMD ["php-fpm"]
+# Expose port (Render auto detects)
+EXPOSE 10000
+
+CMD php artisan serve --host=0.0.0.0 --port=10000
